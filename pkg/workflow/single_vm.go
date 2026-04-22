@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/itunified-io/proxctl/pkg/config"
 	"github.com/itunified-io/proxctl/pkg/kickstart"
@@ -29,6 +30,9 @@ type SingleVMWorkflow struct {
 	Renderer *kickstart.Renderer
 	Builder  *kickstart.ISOBuilder
 	DryRun   bool
+	// UploadMu serializes the upload-iso step across callers that share a
+	// Proxmox storage endpoint (multi-node Apply). Optional.
+	UploadMu *sync.Mutex
 }
 
 // resolved pulls commonly-accessed nested structures from the env.
@@ -158,7 +162,14 @@ func (w *SingleVMWorkflow) Apply(ctx context.Context, changes []Change) error {
 			if isoPath == "" {
 				return errors.New("apply: iso path empty (did build-iso run?)")
 			}
-			if err := w.Client.UploadISO(ctx, r.node.Proxmox.NodeName, r.iso.KickstartStorage, isoPath, fmt.Sprintf("proxctl-%s.iso", w.NodeName)); err != nil {
+			if w.UploadMu != nil {
+				w.UploadMu.Lock()
+			}
+			err := w.Client.UploadISO(ctx, r.node.Proxmox.NodeName, r.iso.KickstartStorage, isoPath, fmt.Sprintf("proxctl-%s.iso", w.NodeName))
+			if w.UploadMu != nil {
+				w.UploadMu.Unlock()
+			}
+			if err != nil {
 				return fmt.Errorf("upload-iso: %w", err)
 			}
 		case "create-vm":
