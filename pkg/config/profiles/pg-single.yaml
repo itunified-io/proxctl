@@ -1,0 +1,18 @@
+# Profile: pg-single
+# Baseline defaults for a single-node PostgreSQL env.
+version: "1"
+kind: Env
+metadata:
+  name: pg-single-profile
+  description: Baseline for a single-node PostgreSQL deployment
+spec:
+  hypervisor:
+    kind: Hypervisor
+    nodes: {}
+  networks:
+    kind: Networks
+  storage_classes:
+    kind: StorageClasses
+  cluster:
+    kind: Cluster
+    type: pg-single

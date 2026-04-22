@@ -1,0 +1,20 @@
+# Profile: oracle-rac-2node
+# Baseline defaults for a 2-node Oracle RAC env. Applied when an Env sets
+# `extends: oracle-rac-2node`. Fields defined here are merged only where the
+# concrete env does not override.
+version: "1"
+kind: Env
+metadata:
+  name: oracle-rac-2node-profile
+  description: Baseline for a 2-node Oracle RAC deployment
+spec:
+  hypervisor:
+    kind: Hypervisor
+    nodes: {}
+  networks:
+    kind: Networks
+  storage_classes:
+    kind: StorageClasses
+  cluster:
+    kind: Cluster
+    type: oracle-rac

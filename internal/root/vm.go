@@ -1,20 +1,221 @@
 package root
 
-import "github.com/spf13/cobra"
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"text/tabwriter"
+
+	"github.com/itunified-io/proxclt/pkg/kickstart"
+	"github.com/itunified-io/proxclt/pkg/proxmox"
+	"github.com/itunified-io/proxclt/pkg/workflow"
+	"github.com/spf13/cobra"
+)
 
 func newVMCmd() *cobra.Command {
 	c := &cobra.Command{
 		Use:   "vm",
 		Short: "Manage individual VMs (create, start, stop, delete, list, status)",
 	}
+
+	var vmForceStop bool
+	var vmDeletePurge bool
+
 	c.AddCommand(
-		&cobra.Command{Use: "create NAME", Short: "Create a VM from env spec", Args: cobra.ExactArgs(1), RunE: notImplemented("vm create")},
-		&cobra.Command{Use: "start NAME", Short: "Start a VM", Args: cobra.ExactArgs(1), RunE: notImplemented("vm start")},
-		&cobra.Command{Use: "stop NAME", Short: "Stop a VM (ACPI shutdown; --force for hard stop)", Args: cobra.ExactArgs(1), RunE: notImplemented("vm stop")},
-		&cobra.Command{Use: "reboot NAME", Short: "Reboot a VM", Args: cobra.ExactArgs(1), RunE: notImplemented("vm reboot")},
-		&cobra.Command{Use: "delete NAME", Short: "Delete a VM (double-confirm gate)", Args: cobra.ExactArgs(1), RunE: notImplemented("vm delete")},
-		&cobra.Command{Use: "list", Short: "List VMs known to state.db", RunE: notImplemented("vm list")},
-		&cobra.Command{Use: "status NAME", Short: "Print live VM status (PVE + state.db)", Args: cobra.ExactArgs(1), RunE: notImplemented("vm status")},
+		&cobra.Command{
+			Use:   "create NAME",
+			Short: "Create a VM from env spec",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				env, err := loadEnvManifest("")
+				if err != nil {
+					return err
+				}
+				client, err := loadProxmoxClient()
+				if err != nil {
+					return err
+				}
+				rnd, err := kickstart.NewRenderer()
+				if err != nil {
+					return err
+				}
+				w := &workflow.SingleVMWorkflow{
+					Config:   env,
+					NodeName: args[0],
+					Client:   client,
+					Renderer: rnd,
+				}
+				return w.Up(context.Background())
+			},
+		},
+		&cobra.Command{
+			Use:   "start NAME",
+			Short: "Start a VM",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				env, err := loadEnvManifest("")
+				if err != nil {
+					return err
+				}
+				node, vmid, err := resolveNodeRef(env, args[0])
+				if err != nil {
+					return err
+				}
+				client, err := loadProxmoxClient()
+				if err != nil {
+					return err
+				}
+				return client.StartVM(context.Background(), node, vmid)
+			},
+		},
+		func() *cobra.Command {
+			cc := &cobra.Command{
+				Use:   "stop NAME",
+				Short: "Stop a VM (ACPI shutdown; --force for hard stop)",
+				Args:  cobra.ExactArgs(1),
+				RunE: func(cmd *cobra.Command, args []string) error {
+					env, err := loadEnvManifest("")
+					if err != nil {
+						return err
+					}
+					node, vmid, err := resolveNodeRef(env, args[0])
+					if err != nil {
+						return err
+					}
+					client, err := loadProxmoxClient()
+					if err != nil {
+						return err
+					}
+					return client.StopVM(context.Background(), node, vmid, vmForceStop)
+				},
+			}
+			cc.Flags().BoolVar(&vmForceStop, "force", false, "hard stop instead of ACPI shutdown")
+			return cc
+		}(),
+		&cobra.Command{
+			Use:   "reboot NAME",
+			Short: "Reboot a VM",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				env, err := loadEnvManifest("")
+				if err != nil {
+					return err
+				}
+				node, vmid, err := resolveNodeRef(env, args[0])
+				if err != nil {
+					return err
+				}
+				client, err := loadProxmoxClient()
+				if err != nil {
+					return err
+				}
+				return client.RebootVM(context.Background(), node, vmid)
+			},
+		},
+		func() *cobra.Command {
+			cc := &cobra.Command{
+				Use:   "delete NAME",
+				Short: "Delete a VM (double-confirm gate)",
+				Args:  cobra.ExactArgs(1),
+				RunE: func(cmd *cobra.Command, args []string) error {
+					env, err := loadEnvManifest("")
+					if err != nil {
+						return err
+					}
+					node, vmid, err := resolveNodeRef(env, args[0])
+					if err != nil {
+						return err
+					}
+					if !flagYes {
+						return fmt.Errorf("refusing to delete without --yes")
+					}
+					client, err := loadProxmoxClient()
+					if err != nil {
+						return err
+					}
+					return client.DeleteVM(context.Background(), node, vmid, vmDeletePurge)
+				},
+			}
+			cc.Flags().BoolVar(&vmDeletePurge, "purge", true, "purge disks + references")
+			return cc
+		}(),
+		&cobra.Command{
+			Use:   "list",
+			Short: "List VMs on the Proxmox node configured in env",
+			RunE: func(cmd *cobra.Command, args []string) error {
+				env, err := loadEnvManifest("")
+				if err != nil {
+					return err
+				}
+				client, err := loadProxmoxClient()
+				if err != nil {
+					return err
+				}
+				hyp := env.Spec.Hypervisor.Resolved()
+				if hyp == nil {
+					return fmt.Errorf("hypervisor not resolved")
+				}
+				// Collect unique PVE nodes referenced by manifest.
+				seen := map[string]bool{}
+				var allVMs []proxmox.VM
+				for _, n := range hyp.Nodes {
+					pveNode := n.Proxmox.NodeName
+					if seen[pveNode] {
+						continue
+					}
+					seen[pveNode] = true
+					vms, err := client.ListVMs(context.Background(), pveNode)
+					if err != nil {
+						return err
+					}
+					allVMs = append(allVMs, vms...)
+				}
+				if flagJSON {
+					return json.NewEncoder(os.Stdout).Encode(allVMs)
+				}
+				tw := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+				fmt.Fprintln(tw, "VMID\tNAME\tNODE\tSTATUS")
+				for _, vm := range allVMs {
+					fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", vm.VMID, vm.Name, vm.Node, vm.Status)
+				}
+				return tw.Flush()
+			},
+		},
+		&cobra.Command{
+			Use:   "status NAME",
+			Short: "Print live VM status",
+			Args:  cobra.ExactArgs(1),
+			RunE: func(cmd *cobra.Command, args []string) error {
+				env, err := loadEnvManifest("")
+				if err != nil {
+					return err
+				}
+				node, vmid, err := resolveNodeRef(env, args[0])
+				if err != nil {
+					return err
+				}
+				client, err := loadProxmoxClient()
+				if err != nil {
+					return err
+				}
+				vm, err := client.GetVM(context.Background(), node, vmid)
+				if err != nil {
+					return err
+				}
+				if flagJSON {
+					return json.NewEncoder(os.Stdout).Encode(vm)
+				}
+				fmt.Printf("%-10s %d\n%-10s %s\n%-10s %s\n%-10s %s\n%-10s %d MiB\n%-10s %d\n",
+					"VMID:", vm.VMID,
+					"NAME:", vm.Name,
+					"NODE:", vm.Node,
+					"STATUS:", vm.Status,
+					"MEMORY:", vm.Memory,
+					"CORES:", vm.Cores)
+				return nil
+			},
+		},
 	)
 	return c
 }
