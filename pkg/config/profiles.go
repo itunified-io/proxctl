@@ -39,3 +39,16 @@ func ListProfiles() ([]string, error) {
 	}
 	return names, nil
 }
+
+// BuiltinProfiles is a spec-friendly alias of ListProfiles. Errors from the
+// embedded FS are suppressed (the profiles directory is compiled in).
+func BuiltinProfiles() []string {
+	names, _ := ListProfiles()
+	return names
+}
+
+// LoadBuiltinProfile is a spec-friendly alias of LoadProfile returning the raw
+// YAML bytes of an embedded profile by name.
+func LoadBuiltinProfile(name string) ([]byte, error) {
+	return LoadProfile(name)
+}

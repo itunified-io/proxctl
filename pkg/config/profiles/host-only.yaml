@@ -1,0 +1,19 @@
+# Profile: host-only
+# Minimal Linux host (OL9 or Ubuntu 22.04) for host-monitoring tests.
+# Applied when an Env sets `extends: host-only`.
+version: "1"
+kind: Env
+metadata:
+  name: host-only-profile
+  description: Minimal Linux host baseline for host-monitoring
+spec:
+  hypervisor:
+    kind: Hypervisor
+    nodes: {}
+  networks:
+    kind: Networks
+  storage_classes:
+    kind: StorageClasses
+  cluster:
+    kind: Cluster
+    type: host-only
