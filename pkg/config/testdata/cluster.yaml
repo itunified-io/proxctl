@@ -1,0 +1,8 @@
+kind: Cluster
+type: oracle-rac
+scan_name: rac-scan.example.com
+scan_ips:
+  - 10.10.0.110
+  - 10.10.0.111
+  - 10.10.0.112
+interconnect_subnet: 10.10.1.0/24

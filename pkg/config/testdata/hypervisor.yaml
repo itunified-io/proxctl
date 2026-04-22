@@ -1,0 +1,64 @@
+kind: Hypervisor
+nodes:
+  rac-node-1:
+    proxmox:
+      node_name: pve-prod-1
+      vm_id: 1001
+    ips:
+      public: 10.10.0.101
+      private: 10.10.1.101
+    resources:
+      memory: 8192
+      cores: 4
+      sockets: 1
+    nics:
+      - name: net0
+        usage: public
+        bridge: vmbr0
+        network: public
+        ipv4:
+          address: 10.10.0.101/24
+          gateway: 10.10.0.1
+      - name: net1
+        usage: private
+        bridge: vmbr1
+        network: private
+        ipv4:
+          address: 10.10.1.101/24
+    disks:
+      - id: 0
+        size: 64G
+        storage_class: local-lvm
+        interface: scsi0
+        role: root
+  rac-node-2:
+    proxmox:
+      node_name: pve-prod-2
+      vm_id: 1002
+    ips:
+      public: 10.10.0.102
+      private: 10.10.1.102
+    resources:
+      memory: 8192
+      cores: 4
+      sockets: 1
+    nics:
+      - name: net0
+        usage: public
+        bridge: vmbr0
+        network: public
+        ipv4:
+          address: 10.10.0.102/24
+          gateway: 10.10.0.1
+      - name: net1
+        usage: private
+        bridge: vmbr1
+        network: private
+        ipv4:
+          address: 10.10.1.102/24
+    disks:
+      - id: 0
+        size: 64G
+        storage_class: local-lvm
+        interface: scsi0
+        role: root
