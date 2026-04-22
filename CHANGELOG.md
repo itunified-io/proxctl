@@ -2,6 +2,23 @@
 
 All notable changes to proxclt are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.04.11.2 — 2026-04-19
+
+### Added — Phase 2 core implementation
+
+- `pkg/config` (81.6% coverage): full struct models with validator tags, YAML unmarshal, $ref loader + profile extends, secret resolver (env/file/vault/gen/ref + base64/default pipes), cross-field validators (unique vm_ids/hostnames/IPs, RAC invariants, network + storage_class refs), JSON Schema export (#1)
+- `pkg/proxmox` (83.8% coverage): core REST client with token auth + task polling, VM CRUD + list + status, storage list + ISO upload, snapshot CRUD + rollback, first-boot ISO attach + SetBootOrder + ConfigureFirstBoot (#1)
+- `pkg/kickstart` (69.5% coverage): Go text/template + sprig renderer, templates for OL8/OL9/Ubuntu 22.04 (base + common partials), xorriso/mkisofs ISO builder (#1)
+- `pkg/workflow` (53.7% coverage): SingleVMWorkflow with Plan → Apply → Verify → Rollback + Up/Down helpers, dry-run support (#1)
+- `internal/root/clientutil.go`: Proxmox client loader from `~/.proxclt/config.yaml` (kubectl-style contexts) with env-var fallback
+- CLI handlers wired for real: `config validate|render|schema`, `vm create|start|stop|reboot|delete|list|status`, `snapshot create|restore|list|delete`, `kickstart generate|build-iso|upload|distros`, `boot configure-first-boot|eject-iso`, `workflow plan|up|down|status|verify`
+
+### Verified
+
+- `go build ./...`, `go vet ./...`, `staticcheck ./...`, `go test ./...` all clean
+- `proxclt config validate <env.yaml>` roundtrip green
+- `proxclt kickstart distros` lists 3 supported distros
+
 ## v2026.04.11.1 — 2026-04-22
 
 ### Added
