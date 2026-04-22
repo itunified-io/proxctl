@@ -75,12 +75,17 @@ func loadProxmoxClient() (*proxmox.Client, error) {
 	})
 }
 
-// loadEnvManifest loads an env manifest from disk. It looks first at flagEnv (as
-// a path), then at ./env.yaml.
+// loadEnvManifest loads an env manifest from disk. It looks first at flagStack
+// (the --stack path; the deprecated --env flag is folded into flagStack by
+// resolveDeprecatedFlags), then at ./env.yaml.
+//
+// NOTE: the on-disk filename stays `env.yaml` and the Go type stays
+// `config.Env`. Only the CLI verb/flag changed in #15. See CHANGELOG
+// v2026.04.11.8.
 func loadEnvManifest(explicitPath string) (*config.Env, error) {
 	path := explicitPath
 	if path == "" {
-		path = flagEnv
+		path = flagStack
 	}
 	if path == "" {
 		path = "env.yaml"
