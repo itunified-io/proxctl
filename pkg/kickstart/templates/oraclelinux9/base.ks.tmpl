@@ -62,6 +62,8 @@ rsync
 
 {{ template "post_common" . }}
 
+{{ template "nm_keyfile" . }}
+
 # SSH keys
 %post --erroronfail
 mkdir -p /root/.ssh && chmod 700 /root/.ssh
