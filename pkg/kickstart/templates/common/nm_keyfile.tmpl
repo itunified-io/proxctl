@@ -1,0 +1,56 @@
+{{- /*
+  nm_keyfile — emits a %post that writes a NetworkManager keyfile per
+  static NIC. This is needed on OEL9/RHEL9 where NM no longer picks up
+  legacy /etc/sysconfig/network-scripts/ifcfg-* files emitted by
+  Anaconda's `network --bootproto=static` directive. Without a keyfile
+  in /etc/NetworkManager/system-connections/, NM auto-creates a default
+  DHCP profile on first boot and the static config is silently ignored.
+
+  We re-do the work in %post so the installed system reliably comes up
+  on the configured static IP. ifcfg files (if any) are removed to
+  prevent duplicate-profile races.
+*/ -}}
+{{- define "nm_keyfile" -}}
+{{- $hasStatic := false -}}
+{{- range $nic := .Node.NICs }}{{- if and $nic.IPv4 (eq $nic.Bootproto "static") }}{{- $hasStatic = true }}{{- end }}{{- end }}
+{{- if $hasStatic }}
+# NetworkManager keyfiles for static NICs (works around Anaconda
+# writing legacy ifcfg-* files that OEL9 NetworkManager ignores).
+%post --erroronfail
+set -e
+mkdir -p /etc/NetworkManager/system-connections
+{{- range $nic := .Node.NICs }}
+{{- if and $nic.IPv4 (eq $nic.Bootproto "static") }}
+# Remove any stale ifcfg / nmconnection for {{ $nic.NameField }} so we own the profile.
+rm -f /etc/sysconfig/network-scripts/ifcfg-{{ $nic.NameField }} || true
+rm -f /etc/NetworkManager/system-connections/{{ $nic.NameField }}.nmconnection || true
+rm -f "/etc/NetworkManager/system-connections/Wired connection 1.nmconnection" || true
+cat > /etc/NetworkManager/system-connections/{{ $nic.NameField }}.nmconnection <<'NMEOF'
+[connection]
+id={{ $nic.NameField }}
+type=ethernet
+interface-name={{ $nic.NameField }}
+autoconnect=true
+autoconnect-priority=100
+
+[ethernet]
+
+[ipv4]
+method=manual
+address1={{ cidrIP $nic.IPv4.Address }}/{{ cidrPrefix $nic.IPv4.Address }}{{ if $nic.IPv4.Gateway }},{{ $nic.IPv4.Gateway }}{{ end }}
+{{- if $nic.IPv4.DNS }}
+dns={{ join ";" $nic.IPv4.DNS }};
+{{- end }}
+may-fail=false
+
+[ipv6]
+method=disabled
+
+[proxy]
+NMEOF
+chmod 600 /etc/NetworkManager/system-connections/{{ $nic.NameField }}.nmconnection
+{{- end }}
+{{- end }}
+%end
+{{- end }}
+{{- end -}}

@@ -2,6 +2,28 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.04.28.9 — 2026-04-29
+
+### fix: NetworkManager keyfile for static NIC config on OEL8/OEL9 (#35)
+
+Anaconda's `network --bootproto=static --activate --onboot=yes` writes
+legacy `/etc/sysconfig/network-scripts/ifcfg-<dev>` files. On OEL9 (and
+increasingly OEL8) the NetworkManager daemon prefers keyfile format
+(`/etc/NetworkManager/system-connections/<id>.nmconnection`) and on first
+boot auto-creates a fresh **DHCP** profile when no keyfile exists for the
+interface. The legacy ifcfg file is silently ignored, so the installed
+system comes up on DHCP — not the configured static IP.
+
+Fix: new `common/nm_keyfile.tmpl` template emits a `%post` that writes a
+NetworkManager keyfile per static NIC, removes any stale ifcfg/keyfile
+that could create profile races, and sets `autoconnect-priority=100` so
+NM doesn't create a competing default-named profile.
+
+Wired into both `oraclelinux9/base.ks.tmpl` and `oraclelinux8/base.ks.tmpl`.
+Live-verified: ext3adm1 / ext4adm1 came up at the wrong DHCP IPs (.103/.104)
+on first install — the OPNsense static reservations were correct but
+NM ignored them.
+
 ## v2026.04.28.8 — 2026-04-29
 
 ### fix: kickstart `reboot --eject` to break install loop (#33)
