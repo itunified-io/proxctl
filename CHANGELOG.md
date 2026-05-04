@@ -2,6 +2,35 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.1 — 2026-05-04
+
+### feat: `proxctl kickstart build-stack` integrated OL8/OL9 build path (#56)
+
+Adds an integrated build path for Oracle Linux 8/9 (and other RHEL-family)
+distros, mirroring the shape of `build-ubuntu`. Unblocks the infrastructure
+repo's `/proxctl-stack-kickstart` skill which was calling a high-level
+per-stack iteration that did not exist in the binary.
+
+What's new:
+
+- `pkg/kickstart/iso_extractor.go` — `ExtractBootloader(sourceISO, destDir)`
+  uses `xorriso -osirrox` to pull `/isolinux/{isolinux.bin,ldlinux.c32,
+  vmlinuz,initrd.img}` from an upstream OL/RHEL/Rocky install ISO. Verifies
+  all four files post-extraction.
+- `internal/root/kickstart.go` — `proxctl kickstart build-stack [ENV_FILE]`
+  subcommand:
+  - extracts the bootloader once into a temp dir, reused for all nodes;
+  - rejects `ubuntu*` distros with a hint to use `build-ubuntu`;
+  - per-node renders ks.cfg → builds ISO → optional upload via mcp-proxmox
+    `UploadISO` to `hypervisor.iso.kickstart_storage`;
+  - flags: `--source-iso` (required), `--node`, `--out-dir`, `--upload`,
+    `--keep`.
+- `pkg/kickstart/iso_extractor_test.go` — unit tests for the extractor
+  (validation errors + happy path + missing-file detection). Skipped when
+  xorriso is not on PATH.
+- `internal/root/coverage_test.go` — smoke tests for `build-stack`
+  (`--source-iso` required, ubuntu rejection).
+
 ## v2026.04.30.7 — 2026-04-30
 
 ### fix: ubuntu2404 autoinstall must inject BEFORE casper `---` separator

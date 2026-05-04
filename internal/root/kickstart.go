@@ -3,13 +3,33 @@ package root
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/itunified-io/proxctl/pkg/kickstart"
+	"github.com/itunified-io/proxctl/pkg/proxmox"
 	"github.com/spf13/cobra"
 )
+
+// copyISOFile is a tiny helper for cross-device os.Rename fallback in build-stack.
+func copyISOFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	if _, err := io.Copy(out, in); err != nil {
+		return err
+	}
+	return out.Sync()
+}
 
 func newKickstartCmd() *cobra.Command {
 	c := &cobra.Command{
@@ -27,6 +47,12 @@ func newKickstartCmd() *cobra.Command {
 	var ubuntuSourceISO string
 	var ubuntuOut string
 	var ubuntuWorkDir string
+
+	var stackNode string
+	var stackSourceISO string
+	var stackOutDir string
+	var stackUpload bool
+	var stackKeep bool
 
 	c.AddCommand(
 		func() *cobra.Command {
@@ -207,6 +233,152 @@ Use this when env.spec.hypervisor.kickstart.distro = "ubuntu2404".`,
 			cc.Flags().StringVar(&ubuntuSourceISO, "source-iso", "", "Path to upstream Ubuntu live-server install ISO")
 			cc.Flags().StringVarP(&ubuntuOut, "out", "o", "", "Output ISO path (default: tempdir under workdir)")
 			cc.Flags().StringVar(&ubuntuWorkDir, "workdir", "", "Scratch directory (default: $TMPDIR)")
+			return cc
+		}(),
+		func() *cobra.Command {
+			cc := &cobra.Command{
+				Use:   "build-stack [ENV_FILE]",
+				Short: "Build per-node OL8/OL9 install ISOs from a stack manifest (integrated render+extract+build+upload)",
+				Long: `Mirrors build-ubuntu for OL8/OL9 (and other RHEL-family) distros: extracts
+the bootloader (isolinux.bin, ldlinux.c32, vmlinuz, initrd.img) from the
+upstream install ISO once, then for each node renders ks.cfg, builds a
+kickstart-only boot ISO, and optionally uploads it to the node's
+hypervisor.iso.kickstart_storage.
+
+Errors out for ubuntu* distros — use ` + "`build-ubuntu`" + ` instead.`,
+				Args: cobra.MaximumNArgs(1),
+				RunE: func(cmd *cobra.Command, args []string) error {
+					if stackSourceISO == "" {
+						return fmt.Errorf("--source-iso required (path to upstream OL install ISO)")
+					}
+					var envPath string
+					if len(args) > 0 {
+						envPath = args[0]
+					}
+					env, err := loadEnvManifest(envPath)
+					if err != nil {
+						return err
+					}
+					hyp := env.Spec.Hypervisor.Resolved()
+					if hyp == nil {
+						return fmt.Errorf("env.spec.hypervisor not resolved")
+					}
+					if hyp.Kickstart == nil {
+						return fmt.Errorf("env has no kickstart config")
+					}
+					distro := hyp.Kickstart.Distro
+					if strings.HasPrefix(distro, "ubuntu") {
+						return fmt.Errorf("distro %q is Ubuntu-family — use `proxctl kickstart build-ubuntu` instead", distro)
+					}
+
+					// Pick nodes.
+					var nodes []string
+					if stackNode != "" {
+						if _, ok := hyp.Nodes[stackNode]; !ok {
+							return fmt.Errorf("node %q not found in hypervisor.nodes", stackNode)
+						}
+						nodes = []string{stackNode}
+					} else {
+						for n := range hyp.Nodes {
+							nodes = append(nodes, n)
+						}
+					}
+					if len(nodes) == 0 {
+						return fmt.Errorf("no nodes to build")
+					}
+
+					// Extract bootloader once.
+					bootloaderDir, err := os.MkdirTemp("", "proxctl-bootloader-")
+					if err != nil {
+						return fmt.Errorf("mkdtemp bootloader: %w", err)
+					}
+					defer os.RemoveAll(bootloaderDir)
+					if err := kickstart.ExtractBootloader(stackSourceISO, bootloaderDir); err != nil {
+						return fmt.Errorf("extract bootloader: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "extracted bootloader from %s -> %s\n", stackSourceISO, bootloaderDir)
+
+					// Output dir for ISOs.
+					outDir := stackOutDir
+					if outDir == "" {
+						outDir, err = os.MkdirTemp("", "proxctl-stack-iso-")
+						if err != nil {
+							return fmt.Errorf("mkdtemp out: %w", err)
+						}
+					} else {
+						if err := os.MkdirAll(outDir, 0o755); err != nil {
+							return err
+						}
+					}
+
+					rnd, err := kickstart.NewRenderer()
+					if err != nil {
+						return err
+					}
+					builder := kickstart.NewISOBuilder(bootloaderDir)
+
+					var pveClient *proxmox.Client
+					if stackUpload {
+						client, err := loadProxmoxClient()
+						if err != nil {
+							return fmt.Errorf("load proxmox client: %w", err)
+						}
+						pveClient = client
+						if hyp.ISO == nil || hyp.ISO.KickstartStorage == "" {
+							return fmt.Errorf("--upload requires hypervisor.iso.kickstart_storage in env manifest")
+						}
+					}
+
+					for _, n := range nodes {
+						nodeCfg, ok := hyp.Nodes[n]
+						if !ok {
+							return fmt.Errorf("node %q vanished from hypervisor.nodes", n)
+						}
+						content, err := rnd.Render(env, n)
+						if err != nil {
+							return fmt.Errorf("render %s: %w", n, err)
+						}
+						isoPath, err := builder.Build(content, n)
+						if err != nil {
+							return fmt.Errorf("build iso %s: %w", n, err)
+						}
+						// Move into outDir if it's not already under there.
+						destPath := filepath.Join(outDir, filepath.Base(isoPath))
+						if isoPath != destPath {
+							if err := os.Rename(isoPath, destPath); err != nil {
+								// Cross-device fallback: copy + remove.
+								if err2 := copyISOFile(isoPath, destPath); err2 != nil {
+									return fmt.Errorf("relocate iso %s -> %s: %w (copy fallback: %v)", isoPath, destPath, err, err2)
+								}
+								_ = os.Remove(isoPath)
+							}
+							isoPath = destPath
+						}
+						fmt.Println(isoPath)
+
+						if stackUpload {
+							storage := hyp.ISO.KickstartStorage
+							pveNode := nodeCfg.Proxmox.NodeName
+							if pveNode == "" {
+								return fmt.Errorf("node %q has no proxmox.node_name", n)
+							}
+							if err := pveClient.UploadISO(context.Background(), pveNode, storage, isoPath, filepath.Base(isoPath)); err != nil {
+								return fmt.Errorf("upload %s -> %s/%s: %w", isoPath, pveNode, storage, err)
+							}
+							fmt.Fprintf(os.Stderr, "uploaded %s to %s:%s\n", filepath.Base(isoPath), pveNode, storage)
+							if !stackKeep {
+								_ = os.Remove(isoPath)
+							}
+						}
+					}
+					return nil
+				},
+			}
+			cc.Flags().StringVar(&stackNode, "node", "", "single node name (default: build all nodes in env)")
+			cc.Flags().StringVar(&stackSourceISO, "source-iso", "", "path to upstream OL install ISO (required)")
+			cc.Flags().StringVar(&stackOutDir, "out-dir", "", "output directory for per-host ISOs (default: tempdir)")
+			cc.Flags().BoolVar(&stackUpload, "upload", false, "upload each ISO to its node's hypervisor.iso.kickstart_storage")
+			cc.Flags().BoolVar(&stackKeep, "keep", false, "keep local ISOs after upload (default: delete)")
 			return cc
 		}(),
 		&cobra.Command{

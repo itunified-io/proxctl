@@ -1571,3 +1571,47 @@ func TestNotImplemented_Fn(t *testing.T) {
 
 // ensure fmt is used (builds clean even if some tests above don't need it).
 var _ = fmt.Sprintf
+
+// TestKickstart_BuildStack_RequiresSourceISO covers the synchronous flag check.
+func TestKickstart_BuildStack_RequiresSourceISO(t *testing.T) {
+	home := isolateHome(t)
+	writeEnvFixture(t, home)
+	t.Chdir(home)
+	_, err := executeCmd(t, "kickstart", "build-stack")
+	if err == nil {
+		t.Fatal("expected error when --source-iso is missing")
+	}
+	if !strings.Contains(err.Error(), "source-iso") {
+		t.Fatalf("expected --source-iso error, got: %v", err)
+	}
+}
+
+// TestKickstart_BuildStack_RejectsUbuntu ensures the command refuses to run
+// for Ubuntu distros and points operators at build-ubuntu.
+func TestKickstart_BuildStack_RejectsUbuntu(t *testing.T) {
+	home := isolateHome(t)
+	writeEnvFixture(t, home)
+	t.Chdir(home)
+	// Patch the env fixture to be ubuntu2404. distro lives inline in env.yaml.
+	envPath := filepath.Join(home, "env.yaml")
+	data, err := os.ReadFile(envPath)
+	if err != nil {
+		t.Fatalf("read env.yaml: %v", err)
+	}
+	patched := strings.ReplaceAll(string(data), "oraclelinux9", "ubuntu2404")
+	patched = strings.ReplaceAll(patched, "oraclelinux8", "ubuntu2404")
+	if err := os.WriteFile(envPath, []byte(patched), 0o644); err != nil {
+		t.Fatalf("write patched env: %v", err)
+	}
+
+	// Provide a fake source ISO path so we get past the source-iso check
+	// and into the distro check. The file doesn't need to exist — the
+	// distro check runs before extraction.
+	_, err = executeCmd(t, "kickstart", "build-stack", "--source-iso", "/tmp/fake.iso")
+	if err == nil {
+		t.Fatal("expected error for ubuntu distro")
+	}
+	if !strings.Contains(err.Error(), "build-ubuntu") {
+		t.Fatalf("expected hint to use build-ubuntu, got: %v", err)
+	}
+}
