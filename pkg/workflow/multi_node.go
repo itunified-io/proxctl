@@ -39,6 +39,11 @@ type MultiNodeWorkflow struct {
 	// SkipKickstartBuild propagates to every per-node SingleVMWorkflow. See
 	// SingleVMWorkflow.SkipKickstartBuild.
 	SkipKickstartBuild bool
+	// SkipFinalize disables the post-install finalize step (SSH-up wait +
+	// detach ide2/ide3 + reset boot order). Default false. See #67.
+	SkipFinalize bool
+	// FinalizeOptions tunes the finalize step. Zero-value uses defaults.
+	FinalizeOptions FinalizeOptions
 }
 
 // NewMultiNodeWorkflow is a small factory that fills sensible defaults.
@@ -91,6 +96,8 @@ func (m *MultiNodeWorkflow) perNode(name string) *SingleVMWorkflow {
 		DryRun:             m.DryRun,
 		UploadMu:           m.isoMu(),
 		SkipKickstartBuild: m.SkipKickstartBuild,
+		SkipFinalize:       m.SkipFinalize,
+		FinalizeOptions:    m.FinalizeOptions,
 	}
 }
 
@@ -273,6 +280,11 @@ func (m *MultiNodeWorkflow) Up(ctx context.Context) error {
 	}
 	if err := m.Verify(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: verify: %v\n", err)
+	}
+	if !m.SkipFinalize && !m.DryRun {
+		if err := m.Finalize(ctx); err != nil {
+			return fmt.Errorf("finalize: %w", err)
+		}
 	}
 	return nil
 }

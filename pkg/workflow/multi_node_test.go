@@ -228,6 +228,7 @@ func TestMultiNode_Up_HappyPath(t *testing.T) {
 	defer srv.Close()
 	rnd, _ := kickstart.NewRenderer()
 	m := NewMultiNodeWorkflow(testMultiEnv(), p.client(t, srv), rnd, stubISOBuilder(t))
+	m.SkipFinalize = true // Up tests don't simulate SSH; finalize is exercised separately.
 	if err := m.Up(context.Background()); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
