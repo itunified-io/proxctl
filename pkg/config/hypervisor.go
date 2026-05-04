@@ -87,6 +87,12 @@ type KickstartConfig struct {
 	Lang            string              `yaml:"lang,omitempty"             json:"lang,omitempty"`
 	Mode            string              `yaml:"mode,omitempty"             json:"mode,omitempty"             validate:"omitempty,oneof=text graphical"`
 	IPv6Enabled     bool                `yaml:"ipv6,omitempty"             json:"ipv6,omitempty"`
+	// InstallURL — primary base-OS install source for OL/RHEL kickstart. Must
+	// be set (or template default used) so Anaconda has a `url` directive;
+	// without one, Anaconda halts at "Installation source: Error setting up
+	// software source" because the kickstart-only ISO built by build-stack
+	// has no BaseOS/AppStream content. Default: yum.oracle.com OL9 baseos.
+	InstallURL      string              `yaml:"install_url,omitempty"      json:"install_url,omitempty"`
 	ChronyServers   []string            `yaml:"chrony_servers,omitempty"   json:"chrony_servers,omitempty"`
 	Sudo            *SudoConfig         `yaml:"sudo,omitempty"             json:"sudo,omitempty"`
 	Packages        *PackagesConfig     `yaml:"packages,omitempty"         json:"packages,omitempty"`
