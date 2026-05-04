@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"text/tabwriter"
+	"time"
 
 	"github.com/itunified-io/proxctl/pkg/config"
 	"github.com/itunified-io/proxctl/pkg/kickstart"
@@ -37,6 +38,8 @@ func newWorkflowCmd() *cobra.Command {
 	var wfMaxConc int
 	var wfContinue bool
 	var wfSkipKickstart bool
+	var wfSkipFinalize bool
+	var wfFinalizeTimeout time.Duration
 
 	loadCommon := func() (*config.Env, *kickstart.Renderer, *kickstart.ISOBuilder, error) {
 		env, err := loadEnvManifest("")
@@ -67,6 +70,10 @@ func newWorkflowCmd() *cobra.Command {
 			Builder:            builder,
 			DryRun:             wfDryRun,
 			SkipKickstartBuild: wfSkipKickstart,
+			SkipFinalize:       wfSkipFinalize,
+			FinalizeOptions: workflow.FinalizeOptions{
+				Timeout: wfFinalizeTimeout,
+			},
 		}, nil
 	}
 
@@ -82,6 +89,8 @@ func newWorkflowCmd() *cobra.Command {
 		}
 		m.ContinueOnError = wfContinue
 		m.SkipKickstartBuild = wfSkipKickstart
+		m.SkipFinalize = wfSkipFinalize
+		m.FinalizeOptions = workflow.FinalizeOptions{Timeout: wfFinalizeTimeout}
 		return m, nil
 	}
 
@@ -263,7 +272,45 @@ func newWorkflowCmd() *cobra.Command {
 		},
 	}
 
-	for _, sub := range []*cobra.Command{planCmd, upCmd, downCmd, verifyCmd} {
+	finalizeCmd := &cobra.Command{
+		Use:   "finalize",
+		Short: "Post-install: wait for SSH-up, detach install/kickstart ISOs, reset boot order to scsi0 (#67)",
+		Long: `finalize closes the kickstart install loop:
+
+  1. Polls for SSH-up on the node's management/public IP (TCP :22 + banner)
+  2. Detaches the kickstart ISO (ide3) and install ISO (ide2) from the VM
+  3. Resets the boot order to scsi0 (single device)
+
+This step runs automatically as part of "workflow up" unless --skip-finalize
+is passed. Re-run standalone on already-installed VMs to recover from a
+previous run that exited before finalize completed.`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			env, rnd, builder, err := loadCommon()
+			if err != nil {
+				if wfNode == "" {
+					return fmt.Errorf("--node required for single-node workflow")
+				}
+				return err
+			}
+			if isMultiNode(env) && wfNode == "" {
+				m, err := makeMulti(env, rnd, builder)
+				if err != nil {
+					return err
+				}
+				return m.Finalize(context.Background())
+			}
+			if wfNode == "" {
+				return fmt.Errorf("--node required for single-node workflow")
+			}
+			w, err := makeSingle(env, rnd, builder, wfNode)
+			if err != nil {
+				return err
+			}
+			return w.Finalize(context.Background())
+		},
+	}
+
+	for _, sub := range []*cobra.Command{planCmd, upCmd, downCmd, verifyCmd, finalizeCmd} {
 		sub.Flags().StringVar(&wfNode, "node", "", "node name from env manifest (single-node override)")
 		sub.Flags().StringVar(&wfBootloader, "bootloader-dir", "", "path to bootloader files (isolinux.bin, vmlinuz, initrd.img)")
 	}
@@ -275,9 +322,15 @@ func newWorkflowCmd() *cobra.Command {
 	upCmd.Flags().BoolVar(&wfDryRun, "dry-run", false, "print actions without executing")
 	upCmd.Flags().IntVar(&wfMaxConc, "max-concurrency", 0, "cap concurrent per-node Apply goroutines (0=default)")
 	upCmd.Flags().BoolVar(&wfContinue, "continue-on-error", false, "keep running remaining nodes when one fails")
+	upCmd.Flags().BoolVar(&wfSkipFinalize, "skip-finalize", false,
+		"skip the post-install finalize step (SSH-up wait + detach ide2/ide3 + reset boot order); see #67")
+	for _, sub := range []*cobra.Command{upCmd, finalizeCmd} {
+		sub.Flags().DurationVar(&wfFinalizeTimeout, "finalize-timeout", 0,
+			"max wait for SSH-up during finalize (default 30m)")
+	}
 	downCmd.Flags().BoolVar(&wfForce, "force", false, "hard stop instead of ACPI shutdown")
 
-	c.AddCommand(planCmd, upCmd, downCmd, statusCmd, verifyCmd, newWorkflowProfileCmd())
+	c.AddCommand(planCmd, upCmd, downCmd, statusCmd, verifyCmd, finalizeCmd, newWorkflowProfileCmd())
 	return c
 }
 

@@ -2,6 +2,50 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.6 — 2026-05-04
+
+### feat(workflow): post-install finalize — detach ide2/ide3, reset boot order to scsi0 (#67)
+
+Closes the kickstart install-loop bug hit live during ext3 Stage 2 on
+2026-05-04. After Anaconda finishes the kickstart install on scsi0 and
+reboots, ide3 (kickstart ISO) is still attached and still bootable. With
+ide3 ahead of scsi0 in the boot order (which is required for the *first*
+install), BIOS re-enters the kickstart ISO on the second boot —
+**install loop**.
+
+The fix adds a finalize step to the workflow lifecycle:
+
+1. Poll for SSH-up on the node's management/public IP (TCP :22 + banner
+   detection), default 30 min timeout.
+2. Detach ide3 (kickstart ISO) via `qm set <vmid> -delete ide3`.
+3. Detach ide2 (install ISO) via `qm set <vmid> -delete ide2`.
+4. Reset boot order to `order=scsi0` (single device).
+
+CLI surface:
+- New `proxctl workflow finalize` subcommand — single-node + multi-node.
+  Idempotent; safe to re-run on already-finalised VMs.
+- `proxctl workflow up` now runs finalize automatically; opt out via
+  `--skip-finalize`.
+- `--finalize-timeout <duration>` overrides the default 30 min SSH-up wait.
+
+Files touched:
+- `pkg/workflow/finalize.go` — new `FinalizeOptions`, `waitForSSHUp` (TCP
+  dial + banner check), `pickFinalizeIP` (priority: management → public →
+  private → any), `FinalizeSingle`, `SingleVMWorkflow.Finalize`,
+  `MultiNodeWorkflow.Finalize`.
+- `pkg/workflow/single_vm.go` — `SingleVMWorkflow.SkipFinalize` +
+  `FinalizeOptions` fields; `Up` invokes finalize unless `SkipFinalize`
+  or `DryRun` is set.
+- `pkg/workflow/multi_node.go` — same on `MultiNodeWorkflow`; per-node
+  inheritance via `perNode`.
+- `internal/root/workflow.go` — new `finalize` subcommand, `--skip-finalize`
+  on `up`, shared `--finalize-timeout` on `up` + `finalize`.
+- `pkg/workflow/finalize_test.go` — unit tests for IP priority, SSH-up
+  polling (banner seen, retries, timeout, no-IP, skip mode, non-SSH
+  banner ignored), defaults/overrides, and a httptest integration test
+  that asserts the exact qm-set sequence (delete ide3 → delete ide2 →
+  boot=order=scsi0).
+
 ## v2026.05.04.5 — 2026-05-04
 
 ### fix(kickstart): ReadVolumeLabel xorriso flags (#65)

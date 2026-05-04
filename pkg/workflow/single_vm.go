@@ -41,6 +41,13 @@ type SingleVMWorkflow struct {
 	// out-of-band (e.g. an OEMDRV-labeled ISO), or when iterating on VM
 	// hardware config without re-rendering kickstart. See #23.
 	SkipKickstartBuild bool
+	// SkipFinalize disables the post-install finalize step (SSH-up wait +
+	// detach ide2/ide3 + reset boot order to scsi0). Default false — finalize
+	// runs as part of Up. See #67.
+	SkipFinalize bool
+	// FinalizeOptions tunes the finalize step (SSH-up timeout, poll interval,
+	// dialer for tests). Zero-value uses sane production defaults.
+	FinalizeOptions FinalizeOptions
 }
 
 // resolved pulls commonly-accessed nested structures from the env.
@@ -311,6 +318,14 @@ func (w *SingleVMWorkflow) Up(ctx context.Context) error {
 	// Verify is best-effort — the VM may still be booting when we return.
 	if err := w.Verify(ctx); err != nil {
 		fmt.Fprintf(os.Stderr, "warn: verify: %v\n", err)
+	}
+	// Finalize: wait for SSH-up, detach install/kickstart ISOs, reset boot
+	// order. Mandatory for kickstart-installed VMs to avoid the install loop
+	// (#67). Operators iterating on hardware can opt-out via SkipFinalize.
+	if !w.SkipFinalize && !w.DryRun {
+		if err := w.Finalize(ctx); err != nil {
+			return fmt.Errorf("finalize: %w", err)
+		}
 	}
 	return nil
 }

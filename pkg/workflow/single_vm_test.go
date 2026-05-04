@@ -639,6 +639,7 @@ func TestUp(t *testing.T) {
 	w := &SingleVMWorkflow{
 		Config: testEnv(), NodeName: "web01", Client: state.client(t, srv),
 		Renderer: rnd, Builder: stubISOBuilder(t),
+		SkipFinalize: true, // finalize requires SSH-up; tested separately.
 	}
 	if err := w.Up(context.Background()); err != nil {
 		t.Errorf("Up: %v", err)
@@ -711,6 +712,7 @@ func TestUp_VerifyWarns(t *testing.T) {
 			return c
 		}(),
 		Renderer: rnd, Builder: stubISOBuilder(t),
+		SkipFinalize: true,
 	}
 	// Up should return nil despite verify warning.
 	if err := w.Up(context.Background()); err != nil {
