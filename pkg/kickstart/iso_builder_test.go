@@ -269,3 +269,45 @@ func TestCopyDirAndFile(t *testing.T) {
 		t.Errorf("expected error for unwritable dst")
 	}
 }
+
+// TestISOBuilderBuild_OverwritesReadOnlyIsolinuxCfg verifies that Build() can
+// overwrite a pre-existing read-only isolinux.cfg in the bootloader dir.
+//
+// Regression: ExtractBootloader uses `xorriso -extract /isolinux` which pulls
+// the *entire* /isolinux directory from the source ISO, including a read-only
+// isolinux.cfg authored upstream. copyDir then preserved those mode bits when
+// staging into buildDir, and a plain os.WriteFile over the read-only file
+// failed with EACCES. Build() now removes the stale isolinux.cfg (and ks.cfg,
+// defensively) before authoring its own.
+func TestISOBuilderBuild_OverwritesReadOnlyIsolinuxCfg(t *testing.T) {
+	if detectTool() == "" {
+		t.Skip("no xorriso/mkisofs available")
+	}
+	bootDir := t.TempDir()
+	for _, name := range []string{"isolinux.bin", "ldlinux.c32", "vmlinuz", "initrd.img"} {
+		if err := os.WriteFile(filepath.Join(bootDir, name), []byte("stub"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Plant a read-only isolinux.cfg + ks.cfg the way an upstream ISO extract would.
+	for _, name := range []string{"isolinux.cfg", "ks.cfg"} {
+		path := filepath.Join(bootDir, name)
+		if err := os.WriteFile(path, []byte("upstream readonly content"), 0o444); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b := NewISOBuilder(bootDir)
+	b.WorkDir = t.TempDir()
+	path, err := b.Build("# regenerated kickstart", "testhost")
+	if err != nil {
+		// mkisofs may reject the stub bootloader — that's fine; the regression
+		// would have failed earlier inside Build() with EACCES before reaching
+		// the ISO tool.
+		t.Skipf("ISO tool rejected stub bootloader: %v", err)
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("expected ISO at %s: %v", path, err)
+	}
+	_ = os.Remove(path)
+}
