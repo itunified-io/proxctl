@@ -17,6 +17,15 @@ type ISOBuilder struct {
 	BootloaderDir string
 	// WorkDir is the temp dir root. Defaults to os.TempDir() when empty.
 	WorkDir string
+	// SourceISOLabel is the ISO9660 volume ID of the *upstream* full install ISO.
+	// When non-empty, the generated isolinux.cfg APPEND line includes
+	// `ip=dhcp inst.stage2=hd:LABEL=<label> inst.repo=hd:LABEL=<label>` so
+	// Anaconda reads stage2 + the package repo from a second CDROM drive
+	// attached to the VM that carries the full install ISO. This avoids
+	// fetching stage2 over the network (which fails in dracut-initqueue when
+	// DNS isn't yet configured). When empty, the legacy minimal APPEND is
+	// emitted (back-compat).
+	SourceISOLabel string
 }
 
 // NewISOBuilder creates a builder auto-detecting the ISO tool.
@@ -86,13 +95,11 @@ func (b *ISOBuilder) Build(kickstartContent, hostname string) (string, error) {
 	// those mode bits when staging the bootloader into buildDir, so a plain
 	// os.WriteFile over the pre-existing read-only file fails with EACCES.
 	// Remove any stale isolinux.cfg first; we always author our own here.
-	isolinuxCfg := `DEFAULT linux
-PROMPT 0
-TIMEOUT 10
-LABEL linux
-  KERNEL vmlinuz
-  APPEND initrd=initrd.img inst.ks=cdrom:/ks.cfg inst.text
-`
+	// APPEND line: when SourceISOLabel is set, point Anaconda at the upstream
+	// full ISO via volume label so stage2 + repo load from the second CDROM
+	// drive attached to the VM. Without it, Anaconda tries to fetch stage2
+	// from the network and fails in dracut-initqueue if DNS isn't ready.
+	isolinuxCfg := buildIsolinuxCfg(b.SourceISOLabel)
 	isolinuxPath := filepath.Join(buildDir, "isolinux.cfg")
 	_ = os.Remove(isolinuxPath)
 	if err := os.WriteFile(isolinuxPath, []byte(isolinuxCfg), 0o644); err != nil {
@@ -138,6 +145,24 @@ LABEL linux
 		return "", fmt.Errorf("%s failed: %w: %s", b.Tool, err, string(out))
 	}
 	return outPath, nil
+}
+
+// buildIsolinuxCfg returns the isolinux.cfg content for a kickstart-only ISO.
+// When sourceISOLabel is non-empty, the APPEND line points Anaconda at a
+// second CDROM drive (carrying the full upstream install ISO) for stage2 +
+// the package repo, via ISO9660 volume-label match. When empty, a minimal
+// APPEND is emitted (back-compat with v2026.05.04.3 and earlier).
+func buildIsolinuxCfg(sourceISOLabel string) string {
+	var appendLine string
+	if sourceISOLabel != "" {
+		appendLine = fmt.Sprintf(
+			"  APPEND initrd=initrd.img ip=dhcp inst.stage2=hd:LABEL=%s inst.repo=hd:LABEL=%s inst.ks=cdrom:/ks.cfg inst.text\n",
+			sourceISOLabel, sourceISOLabel,
+		)
+	} else {
+		appendLine = "  APPEND initrd=initrd.img inst.ks=cdrom:/ks.cfg inst.text\n"
+	}
+	return "DEFAULT linux\nPROMPT 0\nTIMEOUT 10\nLABEL linux\n  KERNEL vmlinuz\n" + appendLine
 }
 
 // copyDir copies regular files from src into dst (non-recursive; we assume flat bootloader dir).

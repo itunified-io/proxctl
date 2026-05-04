@@ -1,11 +1,59 @@
 package kickstart
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
+
+// ReadVolumeLabel returns the ISO9660 volume ID (Volume id) of sourceISO using
+// xorriso. The label is what Anaconda matches against `inst.stage2=hd:LABEL=`
+// and `inst.repo=hd:LABEL=` so the kickstart-only ISO can find the upstream
+// full install ISO attached at a second CDROM drive on the VM.
+//
+// Implementation: parses `xorriso -indev <iso> -toc -report_about WARNING`
+// output for the line `Volume id    : <label>`.
+func ReadVolumeLabel(sourceISO string) (string, error) {
+	if sourceISO == "" {
+		return "", fmt.Errorf("ReadVolumeLabel: sourceISO is required")
+	}
+	if _, err := os.Stat(sourceISO); err != nil {
+		return "", fmt.Errorf("source ISO not found: %w", err)
+	}
+	if _, err := exec.LookPath("xorriso"); err != nil {
+		return "", fmt.Errorf("xorriso not found in PATH: %w", err)
+	}
+	cmd := exec.Command("xorriso",
+		"-indev", sourceISO,
+		"-report_about", "WARNING",
+		"-toc",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return "", fmt.Errorf("xorriso -toc failed: %w: %s", err, string(out))
+	}
+	scanner := bufio.NewScanner(strings.NewReader(string(out)))
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		// Match e.g. "Volume id    : 'OL-9-4-0-BaseOS-x86_64'"
+		// or "Volume id    : OL-9-4-0-BaseOS-x86_64"
+		if strings.HasPrefix(line, "Volume id") {
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) != 2 {
+				continue
+			}
+			label := strings.TrimSpace(parts[1])
+			label = strings.Trim(label, "'\"")
+			if label != "" {
+				return label, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("could not find Volume id in xorriso -toc output")
+}
 
 // RequiredBootloaderFiles lists the files an OL8/OL9 install ISO must contain
 // under /isolinux/ for the legacy ISOBuilder to remaster a kickstart-only ISO.
