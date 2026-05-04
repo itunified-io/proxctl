@@ -2,6 +2,42 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.4 — 2026-05-04
+
+### fix(kickstart): inject inst.stage2/inst.repo=hd:LABEL into APPEND (Path B-lite) (#63)
+
+Even with `url` set in the ks.cfg (#61, v2026.05.04.3), Anaconda on OL9
+fails in dracut-initqueue with DNS errors when fetching stage2 from
+`yum.oracle.com`. The kickstart-only ISO doesn't carry stage2 itself, and
+dracut runs before the kickstart `network` directive applies, so the
+stage2 fetch races DNS configuration in lab subnets without an upstream
+resolver.
+
+Fix (operator-approved Path B-lite — avoids the 10 GB full-remaster path):
+have Anaconda read stage2 + the package repo from the **second CDROM
+drive** attached to the VM, which carries the full upstream OL9 install
+ISO. Anaconda matches by ISO9660 volume label, so the kernel cmdline
+remains stable regardless of which CDROM device (sr0/sr1) Anaconda
+probes first.
+
+- `pkg/kickstart/iso_builder.go` — new `ISOBuilder.SourceISOLabel` field;
+  when set, the generated `isolinux.cfg` APPEND line becomes:
+  `APPEND initrd=initrd.img ip=dhcp inst.stage2=hd:LABEL=<label> inst.repo=hd:LABEL=<label> inst.ks=cdrom:/ks.cfg inst.text`.
+  Empty label preserves the legacy minimal APPEND (back-compat).
+- `pkg/kickstart/iso_extractor.go` — new `ReadVolumeLabel(iso)` parses
+  `xorriso -indev <iso> -toc` output for the `Volume id` line.
+- `internal/root/kickstart.go` — `build-stack` subcommand now reads the
+  upstream ISO's volume label automatically and passes it to the
+  builder.
+
+Tests: `TestBuildIsolinuxCfg_NoLabel` (back-compat) and
+`TestBuildIsolinuxCfg_WithLabel` (Path B-lite).
+
+Operator workflow: keep the full OL9 install ISO attached at `ide2` on
+each VM; rebuild the kickstart ISO with `proxctl kickstart build-stack`
+(label flows through automatically); start the VM. Anaconda finds
+stage2 + repo on the local CDROM drive — no DNS, no network repo.
+
 ## v2026.05.04.3 — 2026-05-04
 
 ### fix(kickstart): OL9 ks must include `url` primary install source (#61)

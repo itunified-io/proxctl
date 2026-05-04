@@ -298,6 +298,16 @@ Errors out for ubuntu* distros — use ` + "`build-ubuntu`" + ` instead.`,
 					}
 					fmt.Fprintf(os.Stderr, "extracted bootloader from %s -> %s\n", stackSourceISO, bootloaderDir)
 
+					// Read upstream ISO volume label so Anaconda can locate
+					// stage2 + repo on the second CDROM drive (Path B-lite,
+					// fixes dracut-initqueue DNS errors fetching stage2 from
+					// the network).
+					sourceLabel, err := kickstart.ReadVolumeLabel(stackSourceISO)
+					if err != nil {
+						return fmt.Errorf("read source ISO volume label: %w", err)
+					}
+					fmt.Fprintf(os.Stderr, "source ISO volume label: %s\n", sourceLabel)
+
 					// Output dir for ISOs.
 					outDir := stackOutDir
 					if outDir == "" {
@@ -316,6 +326,7 @@ Errors out for ubuntu* distros — use ` + "`build-ubuntu`" + ` instead.`,
 						return err
 					}
 					builder := kickstart.NewISOBuilder(bootloaderDir)
+					builder.SourceISOLabel = sourceLabel
 
 					var pveClient *proxmox.Client
 					if stackUpload {

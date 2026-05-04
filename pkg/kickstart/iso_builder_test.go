@@ -3,8 +3,40 @@ package kickstart
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// TestBuildIsolinuxCfg_NoLabel verifies back-compat: empty SourceISOLabel
+// emits the legacy minimal APPEND line.
+func TestBuildIsolinuxCfg_NoLabel(t *testing.T) {
+	got := buildIsolinuxCfg("")
+	if !strings.Contains(got, "APPEND initrd=initrd.img inst.ks=cdrom:/ks.cfg inst.text") {
+		t.Errorf("expected legacy minimal APPEND, got:\n%s", got)
+	}
+	if strings.Contains(got, "inst.stage2") || strings.Contains(got, "inst.repo") {
+		t.Errorf("legacy APPEND should not include inst.stage2/inst.repo, got:\n%s", got)
+	}
+}
+
+// TestBuildIsolinuxCfg_WithLabel verifies Path B-lite: when SourceISOLabel
+// is set, the APPEND line includes ip=dhcp + inst.stage2=hd:LABEL= +
+// inst.repo=hd:LABEL= using the supplied label.
+func TestBuildIsolinuxCfg_WithLabel(t *testing.T) {
+	const label = "OL-9-4-0-BaseOS-x86_64"
+	got := buildIsolinuxCfg(label)
+	for _, want := range []string{
+		"ip=dhcp",
+		"inst.stage2=hd:LABEL=" + label,
+		"inst.repo=hd:LABEL=" + label,
+		"inst.ks=cdrom:/ks.cfg",
+		"inst.text",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("APPEND missing %q, got:\n%s", want, got)
+		}
+	}
+}
 
 // helperPATH points PATH at a tempdir and optionally writes fake executables.
 // It restores the original PATH via t.Cleanup.
