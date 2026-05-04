@@ -70,13 +70,22 @@ func (b *ISOBuilder) Build(kickstartContent, hostname string) (string, error) {
 		return "", fmt.Errorf("copy bootloader: %w", err)
 	}
 
-	// Write the kickstart.
+	// Write the kickstart. Defensive: remove any pre-existing ks.cfg in case
+	// the bootloader dir already contained one with restrictive perms.
 	ksPath := filepath.Join(buildDir, "ks.cfg")
+	_ = os.Remove(ksPath)
 	if err := os.WriteFile(ksPath, []byte(kickstartContent), 0o644); err != nil {
 		return "", fmt.Errorf("write ks.cfg: %w", err)
 	}
 
 	// Write isolinux.cfg.
+	//
+	// xorriso `-extract /isolinux` (in ExtractBootloader) pulls the *entire*
+	// /isolinux/ directory from the source ISO, including a read-only
+	// isolinux.cfg authored by the upstream distro. copyDir then preserves
+	// those mode bits when staging the bootloader into buildDir, so a plain
+	// os.WriteFile over the pre-existing read-only file fails with EACCES.
+	// Remove any stale isolinux.cfg first; we always author our own here.
 	isolinuxCfg := `DEFAULT linux
 PROMPT 0
 TIMEOUT 10
@@ -84,7 +93,9 @@ LABEL linux
   KERNEL vmlinuz
   APPEND initrd=initrd.img inst.ks=cdrom:/ks.cfg inst.text
 `
-	if err := os.WriteFile(filepath.Join(buildDir, "isolinux.cfg"), []byte(isolinuxCfg), 0o644); err != nil {
+	isolinuxPath := filepath.Join(buildDir, "isolinux.cfg")
+	_ = os.Remove(isolinuxPath)
+	if err := os.WriteFile(isolinuxPath, []byte(isolinuxCfg), 0o644); err != nil {
 		return "", fmt.Errorf("write isolinux.cfg: %w", err)
 	}
 

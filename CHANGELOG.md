@@ -2,6 +2,23 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.2 — 2026-05-04
+
+### fix(kickstart): iso_builder overwrites read-only isolinux.cfg from upstream ISO (#58)
+
+`ExtractBootloader` uses `xorriso -extract /isolinux` which pulls the
+*entire* /isolinux directory from the source ISO — including a read-only
+`isolinux.cfg` authored upstream. `copyDir` then preserved those mode bits
+when staging into buildDir, and a plain `os.WriteFile` over the read-only
+file failed with EACCES on the very first node `Build()`.
+
+Fix: defensively `os.Remove` both `ks.cfg` and `isolinux.cfg` in the
+buildDir before writing them in `pkg/kickstart/iso_builder.go::Build`.
+Regression test added in `iso_builder_test.go`.
+
+Discovered during Stage 2 attempt 4 of the E2E Oracle OOP-patch lifecycle
+test — first invocation of `build-stack` against ext3+ext4 stacks.
+
 ## v2026.05.04.1 — 2026-05-04
 
 ### feat: `proxctl kickstart build-stack` integrated OL8/OL9 build path (#56)
