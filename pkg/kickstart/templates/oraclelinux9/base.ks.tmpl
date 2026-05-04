@@ -18,6 +18,15 @@ timezone --utc {{ if .Kickstart.Timezone }}{{ .Kickstart.Timezone }}{{ else }}UT
 # Network
 {{ template "network" . }}
 
+# Primary install source — REQUIRED. Without a `url`/`cdrom`/`nfs` directive
+# Anaconda halts at "Installation source: Error setting up software source"
+# even when the boot media has the kickstart loaded. The kickstart-only ISO
+# built by `proxctl kickstart build-stack` contains only bootloader + ks.cfg
+# (no BaseOS/AppStream repo content), so Anaconda cannot fall back to boot
+# media. Use Oracle's public yum mirror (signed, no MOS account, network
+# already configured above). Override via env.yaml `kickstart.install_url`.
+url --url={{ if .Kickstart.InstallURL }}{{ .Kickstart.InstallURL }}{{ else }}https://yum.oracle.com/repo/OracleLinux/OL9/baseos/latest/x86_64/{{ end }}
+
 # Disk / bootloader
 {{ template "disk" . }}
 

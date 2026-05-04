@@ -96,11 +96,42 @@ func TestRendererOL9(t *testing.T) {
 		"firewall --enabled --ssh",
 		"pool.ntp.org",
 		"NOPASSWD",
+		// Anaconda primary install source — without this directive the kickstart
+		// halts at "Installation source: Error setting up software source" because
+		// the kickstart-only ISO has no BaseOS/AppStream content.
+		"url --url=https://yum.oracle.com/repo/OracleLinux/OL9/baseos/latest/x86_64/",
 	}
 	for _, s := range mustContain {
 		if !strings.Contains(out, s) {
 			t.Errorf("rendered kickstart missing %q\n---\n%s", s, out)
 		}
+	}
+}
+
+// TestRenderOL9_CustomInstallURL verifies operator override of the BaseOS
+// install source via Kickstart.InstallURL (e.g. for air-gapped mirrors).
+func TestRenderOL9_CustomInstallURL(t *testing.T) {
+	env := buildEnv()
+	custom := "https://mirror.internal.example.com/ol9/baseos/x86_64/"
+	env.Spec.Hypervisor.Inline.Kickstart.InstallURL = custom
+	r, err := NewRenderer()
+	if err != nil {
+		t.Fatalf("NewRenderer: %v", err)
+	}
+	out, err := r.Render(env, "web01")
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	wantLine := "url --url=" + custom
+	if !strings.Contains(out, wantLine) {
+		t.Errorf("rendered kickstart missing custom install URL %q\n---\n%s", wantLine, out)
+	}
+	// Ensure the default `url --url=` line was not also emitted (would indicate
+	// the template ignored the override). The default base URL still appears in
+	// the `repo --name=ol9_baseos` directive, which is intentional and unrelated.
+	defaultURLLine := "url --url=https://yum.oracle.com/repo/OracleLinux/OL9/baseos/latest/x86_64/"
+	if strings.Contains(out, defaultURLLine) {
+		t.Errorf("rendered kickstart emitted default `url --url=` line despite override\n---\n%s", out)
 	}
 }
 
