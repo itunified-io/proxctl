@@ -26,10 +26,11 @@ func ReadVolumeLabel(sourceISO string) (string, error) {
 	if _, err := exec.LookPath("xorriso"); err != nil {
 		return "", fmt.Errorf("xorriso not found in PATH: %w", err)
 	}
+	// Use plain `-indev <iso>` (no -toc) — xorriso prints `Volume id : '<label>'`
+	// in the standard drive-summary block emitted on indev open. The -toc
+	// subcommand suppresses this line on some builds (xorriso 1.5.8).
 	cmd := exec.Command("xorriso",
 		"-indev", sourceISO,
-		"-report_about", "WARNING",
-		"-toc",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

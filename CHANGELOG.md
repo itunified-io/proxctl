@@ -2,6 +2,19 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.5 — 2026-05-04
+
+### fix(kickstart): ReadVolumeLabel xorriso flags (#65)
+
+`ReadVolumeLabel` from v2026.05.04.4 invoked `xorriso -indev <iso>
+-report_about WARNING -toc` to scrape the `Volume id` line. On xorriso
+1.5.8 (Homebrew, macOS), `-toc` suppresses the drive-summary block where
+`Volume id` lives, returning only the TOC layout header — hence
+`could not find Volume id in xorriso -toc output`.
+
+Fix: drop `-toc` (and `-report_about WARNING`). Plain `xorriso -indev
+<iso>` reliably prints `Volume id : '<label>'` across xorriso versions.
+
 ## v2026.05.04.4 — 2026-05-04
 
 ### fix(kickstart): inject inst.stage2/inst.repo=hd:LABEL into APPEND (Path B-lite) (#63)
