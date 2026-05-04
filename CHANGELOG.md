@@ -2,6 +2,36 @@
 
 All notable changes to proxctl are documented here. Format: CalVer (`YYYY.MM.DD.TS`).
 
+## v2026.05.04.3 — 2026-05-04
+
+### fix(kickstart): OL9 ks must include `url` primary install source (#61)
+
+The kickstart-only ISO built by `proxctl kickstart build-stack` carries
+bootloader + ks.cfg only — no BaseOS/AppStream RPM content. Without a
+`url`/`cdrom`/`nfs` directive in the ks.cfg, Anaconda has nowhere to fetch
+packages from and halts at the interactive menu with:
+
+    Installation source: Error setting up software source
+
+The full OS install ISO mounted at ide2 is unused because the ks didn't
+tell Anaconda to use it. Discovered during Stage 2 attempt 5+ of the E2E
+Oracle OOP-patch lifecycle test against ext3+ext4 stacks.
+
+Fix:
+
+- `pkg/kickstart/templates/oraclelinux9/base.ks.tmpl` — emit
+  `url --url=<InstallURL or default>` after the network block. Default
+  is `https://yum.oracle.com/repo/OracleLinux/OL9/baseos/latest/x86_64/`
+  (signed Oracle mirror, no MOS account required).
+- `pkg/config/hypervisor.go` — add `KickstartConfig.InstallURL` so
+  air-gapped operators can override via `kickstart.install_url` in
+  env.yaml.
+
+Tests: `TestRendererOL9` extended; new `TestRenderOL9_CustomInstallURL`.
+
+Follow-up: OL8 template has the same defect; separate issue when OL8
+returns to the test matrix.
+
 ## v2026.05.04.2 — 2026-05-04
 
 ### fix(kickstart): iso_builder overwrites read-only isolinux.cfg from upstream ISO (#58)
